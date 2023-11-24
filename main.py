@@ -1,5 +1,6 @@
-import json
+import sqlite3, json
 import gplaces, yelp_fusion, consts
+from sqlite_caching import create_connection, create_table, add_to_cache, get_from_cache  # Import necessary functions from sqlite_caching
 
 def reverse_phone_lookup(yelp_fusion_api_key, gplaces_api_key, country_code, phone_number): 
     """
@@ -11,14 +12,14 @@ def reverse_phone_lookup(yelp_fusion_api_key, gplaces_api_key, country_code, pho
     """
     # 1)
     phone_number_formatted = str(country_code) + str(phone_number)
-    # 2)
-    try:
-        with open('cache.json', 'r') as file:
-            cache_json = json.load(file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        cache_json = {}
-    if phone_number_formatted in cache_json:
-        return cache_json[phone_number_formatted]
+    # 2) Check cache
+    conn = create_connection('cache.db')
+    if conn is not None:
+        create_table(conn)  # Create the table if it doesn't exist
+        cached_data = get_from_cache(conn, phone_number_formatted)
+        if cached_data:
+            conn.close()
+            return json.loads(cached_data)
     # 3)
     try:
         names = gplaces.filter(gplaces_api_key, phone_number_formatted)
@@ -27,8 +28,10 @@ def reverse_phone_lookup(yelp_fusion_api_key, gplaces_api_key, country_code, pho
     except PermissionError as e:
         print(f"Permission error occurred: {e}")
         names = []
-    # 4)
-    consts.cache(names, phone_number_formatted)
+    # 4) Cache results using SQLite
+    if conn is not None:
+        add_to_cache(conn, phone_number_formatted, names)
+        conn.close()
     # 5)
     return names
 
@@ -38,4 +41,3 @@ user_inputted_number = input("Enter phone # (ex. 6503860386): ")
 lookup = reverse_phone_lookup(consts.FUSION_API_KEY, consts.GPLACES_API_KEY, user_inputted_country_code, user_inputted_number)
 print('*' * 50, '\n')
 print("Results: " + str(lookup))
-print("Temp Cache: ", str(consts.temp_cache))
